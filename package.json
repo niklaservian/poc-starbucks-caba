@@ -1,0 +1,3 @@
+{"name":"poc-starbucks-caba","private":true,"version":"1.0.0","type":"module","scripts":{"dev":"vite","build":"vite build","geocode":"node scripts/geocode.mjs"},
+"dependencies":{"@deck.gl/aggregation-layers":"^8.9.35","@deck.gl/core":"^8.9.35","@deck.gl/layers":"^8.9.35","@deck.gl/react":"^8.9.35","@supabase/supabase-js":"^2.45.0","maplibre-gl":"^3.6.2","react":"^18.3.1","react-dom":"^18.3.1","react-map-gl":"^7.1.7"},
+"devDependencies":{"@vitejs/plugin-react":"^4.3.1","vite":"^5.4.0"}}
