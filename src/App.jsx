@@ -1,6 +1,3 @@
-import {createClient} from '@supabase/supabase-js'
-const url=import.meta.env.VITE_SUPABASE_URL,key=import.meta.env.VITE_SUPABASE_ANON_KEY
-export const supabase=url&&key?createClient(url,key):null
 import {useEffect,useMemo,useState} from 'react'
 import DeckGL from '@deck.gl/react'
 import {ScatterplotLayer,TextLayer} from '@deck.gl/layers'
@@ -81,4 +78,3 @@ export default function App(){
     <p style={{fontSize:12,color:'#5b6678'}}>Fuente: listado de locales y frecuencias de reparto, georreferenciado con GeoRef Argentina. Datos cargados en Supabase.</p>
   </div>)
 }
-
