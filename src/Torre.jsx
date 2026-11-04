@@ -5,6 +5,8 @@ import {Map} from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {HAD,K,simular,en,costo,hm} from './sim'
 import {supabase} from './supabase'
+import {descargar,borrar} from './remitos'
+import TorreGPS from './TorreGPS'
 
 const STYLE='https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 const VIEW={longitude:-58.43,latitude:-34.60,zoom:11.3,pitch:0,bearing:0}
@@ -13,7 +15,7 @@ const COL=[[0,98,65],[30,100,200],[200,60,160],[230,120,20],[110,60,190],[20,150
 const $=v=>'$'+Math.round(v).toLocaleString('es-AR')
 
 export default function Torre({rows,onBack}){
-  const [dia,setDia]=useState(()=>{const d='DLMXJVS'[new Date().getDay()];return 'LMXJV'.includes(d)?d:'V'}),[t,setT]=useState(0),[play,setPlay]=useState(false),[vel,setVel]=useState(10)
+  const [dia,setDia]=useState(()=>{const d='DLMXJVS'[new Date().getDay()];return 'LMXJV'.includes(d)?d:'V'}),[t,setT]=useState(0),[play,setPlay]=useState(false),[vel,setVel]=useState(10),[modo,setModo]=useState('sim')
   const sim=useMemo(()=>simular(rows.filter(r=>(r.dias||'').split(' ').includes(dia)),'LMXJV'.indexOf(dia)+7),[rows,dia])
   const tend=sim.tend
   useEffect(()=>{if(!play)return;const i=setInterval(()=>setT(x=>Math.min(tend,x+vel/10)),100);return()=>clearInterval(i)},[play,vel,tend])
@@ -25,7 +27,7 @@ export default function Torre({rows,onBack}){
     if(!supabase)return
     setEnt([])
     supabase.from('entregas').select('*').eq('fecha',hoy).eq('dia',dia).order('created_at',{ascending:false}).then(({data})=>setEnt(data||[]))
-    const ch=supabase.channel('torre-'+dia).on('postgres_changes',{event:'INSERT',schema:'public',table:'entregas'},p=>{if(p.new.fecha===hoy&&p.new.dia===dia)setEnt(l=>[p.new,...l])}).subscribe()
+    const ch=supabase.channel('torre-'+dia).on('postgres_changes',{event:'INSERT',schema:'public',table:'entregas'},p=>{if(p.new.fecha===hoy&&p.new.dia===dia)setEnt(l=>[p.new,...l])}).on('postgres_changes',{event:'DELETE',schema:'public',table:'entregas'},p=>setEnt(l=>l.filter(x=>x.id!==p.old.id))).subscribe()
     return()=>{supabase.removeChannel(ch)}
   },[dia])
   const foto=p=>supabase.storage.from('remitos').getPublicUrl(p).data.publicUrl
@@ -53,8 +55,10 @@ export default function Torre({rows,onBack}){
     new TextLayer({id:'tx',data:vehs,getPosition:d=>d.r.p,getText:d=>'V'+d.id,getSize:12,getPixelOffset:[0,-20],fontWeight:700}),
     new ScatterplotLayer({id:'had',data:[HAD],getPosition:d=>[d.longitud,d.latitud],getFillColor:[240,120,20],getRadius:250,radiusMinPixels:9,stroked:true,getLineColor:[0,0,0],lineWidthMinPixels:2}),
   ]
+  if(modo==='gps')return <TorreGPS rows={rows} onBack={()=>setModo('sim')}/>
   return(<>
     <div className="r"><button className="b" onClick={onBack}>← Volver al mapa</button>
+      <button className="b" style={{background:'#f0781e',borderColor:'#f0781e',color:'#fff'}} onClick={()=>setModo('gps')}>Modo GPS en vivo (real)</button>
       <h1 style={{margin:0,fontSize:22}}>Torre de control: seguimiento de un día de reparto</h1></div>
     <p style={{margin:'0 0 10px',color:'#5b6678',fontSize:13}}>Simulación del reparto desde el HAD: plan contra real y costo mientras avanza el recorrido. No usa GPS real: el tránsito y las demoras son simulados.</p>
     <div className="k">{kpis.map(([a,v])=><div key={a} className="c"><b style={{fontSize:22,color:'#006241'}}>{v}</b><div style={{fontSize:12,color:'#5b6678'}}>{a}</div></div>)}</div>
@@ -80,7 +84,8 @@ export default function Torre({rows,onBack}){
           <div style={{fontSize:13,margin:'6px 0'}}>Plan: {$(fPlan)}</div>
           <div style={{fontSize:13}}>Real: {$(fReal)}<span style={{float:'right',color:'#d73232'}}>{fPlan?'+'+((fReal/fPlan-1)*100).toFixed(0)+'%':''}</span></div></div>
         <div className="c"><b>Remitos en vivo</b><div style={{fontSize:12,color:'#5b6678'}}>Fotos subidas por los choferes (día seleccionado, de hoy).</div>
-          {ent.slice(0,6).map(e=><a key={e.id} href={foto(e.foto_path)} target="_blank" rel="noreferrer" style={{display:'flex',gap:8,alignItems:'center',margin:'8px 0',textDecoration:'none',color:'inherit'}}><img src={foto(e.foto_path)} alt="Remito" width={52} height={52} style={{objectFit:'cover',borderRadius:6}}/><span style={{fontSize:13}}><b>{e.local_nombre}</b><br/>V{e.vehiculo} · {e.chofer} · {hora(e)}</span></a>)}
+          {ent.slice(0,6).map(e=><div key={e.id} style={{margin:'10px 0'}}><a href={foto(e.foto_path)} target="_blank" rel="noreferrer" style={{display:'flex',gap:8,alignItems:'center',textDecoration:'none',color:'inherit'}}><img src={foto(e.foto_path)} alt="Remito" width={52} height={52} style={{objectFit:'cover',borderRadius:6}}/><span style={{fontSize:13}}><b>{e.local_nombre}</b><br/>V{e.vehiculo} · {e.chofer} · {hora(e)}</span></a>
+            <div style={{display:'flex',gap:6,marginTop:4}}><button className="b" style={{padding:'3px 8px',fontSize:12}} onClick={()=>descargar(e)}>Descargar</button><button className="b" style={{padding:'3px 8px',fontSize:12,borderColor:'#d73232',color:'#d73232'}} onClick={async()=>{if(await borrar(e))setEnt(l=>l.filter(x=>x.id!==e.id))}}>Eliminar</button></div></div>)}
           {!ent.length&&<div style={{fontSize:13,margin:'6px 0'}}>Todavía no hay remitos confirmados.</div>}</div>
         <div className="c" style={{fontSize:12,color:'#5b6678'}}>Círculo lleno: vehículo real. Círculo vacío: dónde debería estar según el plan. Aro azul: entrega confirmada con foto del remito (pasá el mouse para verla). Paradas: gris pendiente, verde a tiempo, rojo con más de 10 min de demora. Supuestos a validar: vehículo de {K.CAP} pallets, {K.PAL} pallets por visita, {K.VEL} km/h, {K.SERV} min por parada, 2 vueltas por vehículo, salida 17:00 del HAD, distancias en línea recta por {K.CIRC}, tarifas ilustrativas de {$(K.KM_C)} por km y {$(K.H_C)} por hora.</div>
       </div>

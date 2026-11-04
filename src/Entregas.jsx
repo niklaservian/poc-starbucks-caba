@@ -1,13 +1,15 @@
 import {useEffect,useState} from 'react'
 import {supabase} from './supabase'
+import {descargar,borrar} from './remitos'
 
+const bt={padding:'5px 10px',border:'1px solid #006241',borderRadius:6,background:'#fff',color:'#006241',cursor:'pointer',font:'inherit',fontSize:12}
 const card={background:'#fff',border:'1px solid #d9dfe8',borderRadius:10,padding:'10px 14px'}
 export default function Entregas(){
   const [list,setList]=useState([]),[err,setErr]=useState(null)
   useEffect(()=>{
     if(!supabase){setErr('Faltan las variables de Supabase');return}
     supabase.from('entregas').select('*').order('created_at',{ascending:false}).limit(60).then(({data,error})=>error?setErr(error.message):setList(data||[]))
-    const ch=supabase.channel('entregas-vivo').on('postgres_changes',{event:'INSERT',schema:'public',table:'entregas'},p=>setList(l=>[p.new,...l])).subscribe()
+    const ch=supabase.channel('entregas-vivo').on('postgres_changes',{event:'INSERT',schema:'public',table:'entregas'},p=>setList(l=>[p.new,...l])).on('postgres_changes',{event:'DELETE',schema:'public',table:'entregas'},p=>setList(l=>l.filter(x=>x.id!==p.old.id))).subscribe()
     return()=>{supabase.removeChannel(ch)}
   },[])
   const url=p=>supabase.storage.from('remitos').getPublicUrl(p).data.publicUrl
@@ -26,6 +28,7 @@ export default function Entregas(){
         <div style={{marginTop:6}}><b>{e.local_nombre}</b></div>
         <div style={{fontSize:13,color:'#5b6678'}}>Vehículo {e.vehiculo} · {e.chofer}</div>
         <div style={{fontSize:13,color:'#006241'}}>{new Date(e.created_at).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})} · {new Date(e.created_at).toLocaleDateString('es-AR')}</div>
+        <div style={{display:'flex',gap:6,marginTop:8}}><button style={bt} onClick={()=>descargar(e)}>Descargar</button><button style={{...bt,borderColor:'#d73232',color:'#d73232'}} onClick={async()=>{if(await borrar(e))setList(l=>l.filter(x=>x.id!==e.id))}}>Eliminar</button></div>
       </div>)}
     </div>
     {!list.length&&!err&&<p>Todavía no hay entregas confirmadas.</p>}

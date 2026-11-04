@@ -1,4 +1,4 @@
-import {useEffect,useMemo,useState} from 'react'
+import {useEffect,useMemo,useRef,useState} from 'react'
 import {supabase} from './supabase'
 import {simular,hm} from './sim'
 
@@ -11,12 +11,25 @@ export default function Chofer(){
   const d0='DLMXJVS'[new Date().getDay()]
   const [rows,setRows]=useState([]),[dia,setDia]=useState('LMXJV'.includes(d0)?d0:'V'),[veh,setVeh]=useState(1)
   const [chofer,setChofer]=useState(()=>{try{return localStorage.getItem('chofer')||''}catch{return ''}})
-  const [hechas,setHechas]=useState({}),[msg,setMsg]=useState(''),[busy,setBusy]=useState(null)
+  const [gps,setGps]=useState(false),[gpsMsg,setGpsMsg]=useState(''),last=useRef(0),[hechas,setHechas]=useState({}),[msg,setMsg]=useState(''),[busy,setBusy]=useState(null)
   useEffect(()=>{if(supabase)supabase.from('puntos').select('nombre,direccion,latitud,longitud,dias').not('latitud','is',null).then(({data})=>setRows(data||[]))},[])
   const sim=useMemo(()=>simular(rows.filter(r=>(r.dias||'').split(' ').includes(dia)),'LMXJV'.indexOf(dia)+7),[rows,dia])
   const v=sim.veh.find(x=>x.id===veh)||sim.veh[0]
   useEffect(()=>{if(supabase)supabase.from('entregas').select('local_nombre').eq('fecha',hoy()).eq('dia',dia).eq('vehiculo',veh)
     .then(({data})=>setHechas(Object.fromEntries((data||[]).map(d=>[d.local_nombre,true]))))},[dia,veh])
+  useEffect(()=>{
+    if(!gps)return
+    if(!navigator.geolocation){setGpsMsg('Este dispositivo no permite GPS.');setGps(false);return}
+    let lock=null
+    const pedir=async()=>{try{lock=await navigator.wakeLock.request('screen')}catch{}}
+    pedir();const vis=()=>{if(document.visibilityState==='visible')pedir()};document.addEventListener('visibilitychange',vis)
+    const id=navigator.geolocation.watchPosition(async p=>{
+      const t=Date.now();if(t-last.current<10000)return;last.current=t
+      const {error}=await supabase.from('posiciones').insert({dia,vehiculo:veh,chofer:chofer.trim(),lat:p.coords.latitude,lon:p.coords.longitude,precision:Math.round(p.coords.accuracy)})
+      setGpsMsg(error?'Error al enviar: '+error.message:'Ubicación enviada '+new Date().toLocaleTimeString('es-AR')+' (precisión '+Math.round(p.coords.accuracy)+' m)')
+    },e=>{setGpsMsg('No se pudo obtener la ubicación: '+e.message);setGps(false)},{enableHighAccuracy:true,maximumAge:5000,timeout:20000})
+    return()=>{navigator.geolocation.clearWatch(id);document.removeEventListener('visibilitychange',vis);try{lock&&lock.release()}catch{}}
+  },[gps,dia,veh])
   const subir=async(s,file)=>{
     if(!file)return
     if(!chofer.trim()){setMsg('Escribí tu nombre antes de confirmar.');return}
@@ -39,6 +52,10 @@ export default function Chofer(){
       <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>{DIAS.map(([k,n])=><button key={k} style={btn(dia===k)} onClick={()=>{setDia(k);setVeh(1)}}>{n}</button>)}</div>
       <label style={{fontSize:12,color:'#5b6678'}}>Vehículo</label>
       <select value={veh} onChange={e=>setVeh(+e.target.value)} style={{width:'100%',padding:8,font:'inherit'}}>{sim.veh.map(x=><option key={x.id} value={x.id}>Vehículo {x.id} ({x.plan.stops.length} paradas)</option>)}</select>
+    </div>
+    <div style={card}>
+      <button style={{...btn(gps),width:'100%'}} onClick={()=>{if(!chofer.trim()){setMsg('Escribí tu nombre antes de compartir la ubicación.');return};setMsg('');setGps(!gps)}}>{gps?'Dejar de compartir ubicación':'Compartir mi ubicación (GPS)'}</button>
+      <div style={{fontSize:12,color:'#5b6678',marginTop:6}}>{gps?(gpsMsg||'Buscando señal GPS...')+' Dejá esta pantalla abierta y encendida mientras hacés el reparto.':gpsMsg||'Al activarlo, tu ubicación se envía cada 10 segundos a la torre de control.'}</div>
     </div>
     {msg&&<div style={{...card,borderLeft:'4px solid #006241'}}>{msg}</div>}
     {v&&v.plan.stops.map((s,i)=><div key={s.n.nombre} style={card}>
