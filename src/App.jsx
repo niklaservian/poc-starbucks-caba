@@ -5,6 +5,7 @@ import {HeatmapLayer} from '@deck.gl/aggregation-layers'
 import {Map} from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {supabase} from './supabase'
+import Torre from './Torre'
 
 const STYLE='https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 const VIEW={longitude:-58.43,latitude:-34.60,zoom:11.3,pitch:0,bearing:0}
@@ -26,7 +27,7 @@ const css=`.w{font-family:Calibri,Arial,sans-serif;background:#f4f6f9;min-height
 
 export default function App(){
   const [rows,setRows]=useState([]),[err,setErr]=useState(null)
-  const [cat,setCat]=useState('Todas'),[dia,setDia]=useState('Todos'),[dist,setDist]=useState('Todas'),[mode,setMode]=useState('puntos')
+  const [cat,setCat]=useState('Todas'),[dia,setDia]=useState('Todos'),[dist,setDist]=useState('Todas'),[mode,setMode]=useState('puntos'),[vista,setVista]=useState('mapa')
   useEffect(()=>{
     if(!supabase){setErr('Faltan las variables VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY');return}
     supabase.from('puntos').select('nombre,categoria,latitud,longitud,valor,dias,direccion').not('latitud','is',null)
@@ -45,12 +46,14 @@ export default function App(){
     new ScatterplotLayer({id:'had',data:HAD,getPosition:d=>[d.longitud,d.latitud],getFillColor:[240,120,20],getRadius:250,radiusMinPixels:9,stroked:true,getLineColor:[0,0,0],lineWidthMinPixels:2,pickable:true}),
     new TextLayer({id:'t',data:HAD,getPosition:d=>[d.longitud,d.latitud],getText:()=>'HAD',getSize:13,getPixelOffset:[0,-18],fontWeight:700})
   ].filter(Boolean)
+  if(vista==='torre')return(<div className="w"><style>{css}</style><Torre rows={rows} onBack={()=>setVista('mapa')}/></div>)
   return(<div className="w"><style>{css}</style>
     <h1 style={{margin:0,fontSize:22}}>Red de distribución Starbucks CABA</h1>
     <p style={{margin:'2px 0 12px',color:'#5b6678',fontSize:13}}>¿Qué locales concentran más visitas, cuándo y a qué distancia del HAD de Parque Patricios?</p>
     {err&&<p style={{color:'#b00'}}>Error: {err}</p>}
     <div className="k">{kpis.map(([t,v])=><div key={t} className="c"><b style={{fontSize:26,color:'#006241'}}>{v}</b><div style={{fontSize:12,color:'#5b6678'}}>{t}</div></div>)}</div>
     <div className="r">
+      <button className="b" style={{background:'#f0781e',borderColor:'#f0781e',color:'#fff'}} onClick={()=>setVista('torre')}>Torre de control (simulación)</button>
       {['puntos','calor'].map(m=><button key={m} className={'b'+(mode===m?' on':'')} onClick={()=>setMode(m)}>{m==='puntos'?'Puntos':'Mapa de calor'}</button>)}
       <select value={cat} onChange={e=>setCat(e.target.value)} style={{padding:6}}>{['Todas','Alta','Media','Baja'].map(c=><option key={c} value={c}>{c==='Todas'?'Frecuencia: todas':'Frecuencia '+c}</option>)}</select>
       <select value={dist} onChange={e=>setDist(e.target.value)} style={{padding:6}}>{Object.keys(RINGS).map(c=><option key={c} value={c}>{c==='Todas'?'Distancia: todas':c}</option>)}</select>
