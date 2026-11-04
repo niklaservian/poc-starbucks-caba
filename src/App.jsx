@@ -1,72 +1,83 @@
 import {useEffect,useMemo,useState} from 'react'
 import DeckGL from '@deck.gl/react'
-import {ScatterplotLayer,PathLayer,TextLayer} from '@deck.gl/layers'
+import {ScatterplotLayer,TextLayer} from '@deck.gl/layers'
+import {HeatmapLayer} from '@deck.gl/aggregation-layers'
 import {Map} from 'react-map-gl/maplibre'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import {HAD,K,simular,en,costo,hm} from './sim'
+import {supabase} from './supabase'
+import Torre from './Torre'
 
 const STYLE='https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 const VIEW={longitude:-58.43,latitude:-34.60,zoom:11.3,pitch:0,bearing:0}
+const HAD=[{nombre:'HAD Parque Patricios (ubicación aprox.)',longitud:-58.4005,latitud:-34.6360}]
+const COL={Alta:[0,98,65],Media:[60,170,120],Baja:[160,215,190]}
 const DIAS=[['L','Lun'],['M','Mar'],['X','Mié'],['J','Jue'],['V','Vie']]
-const COL=[[0,98,65],[30,100,200],[200,60,160],[230,120,20],[110,60,190],[20,150,170],[180,40,40],[90,90,90]]
-const $=v=>'$'+Math.round(v).toLocaleString('es-AR')
+const PALLETS_POR_VISITA=2
+const RINGS={'Todas':null,'Hasta 4 km':[0,4],'4 a 8 km':[4,8],'Más de 8 km':[8,99]}
+const km=(a,b)=>{const r=Math.PI/180,p=(b.latitud-a.latitud)*r,q=(b.longitud-a.longitud)*r
+  const h=Math.sin(p/2)**2+Math.cos(a.latitud*r)*Math.cos(b.latitud*r)*Math.sin(q/2)**2;return 12742*Math.asin(Math.sqrt(h))}
+const css=`.w{font-family:Calibri,Arial,sans-serif;background:#f4f6f9;min-height:100vh;padding:14px;color:#14213d}
+.k{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+.c{background:#fff;border:1px solid #d9dfe8;border-radius:10px;padding:10px 14px}
+.m{display:grid;grid-template-columns:1fr 290px;gap:12px}
+.b{padding:6px 12px;border:1px solid #006241;border-radius:6px;background:#fff;color:#006241;cursor:pointer;font:inherit}
+.b.on{background:#006241;color:#fff}
+.r{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
+@media(max-width:820px){.m{grid-template-columns:1fr}}`
 
-export default function Torre({rows,onBack}){
-  const [dia,setDia]=useState('V'),[t,setT]=useState(0),[play,setPlay]=useState(false),[vel,setVel]=useState(10)
-  const sim=useMemo(()=>simular(rows.filter(r=>(r.dias||'').split(' ').includes(dia)),'LMXJV'.indexOf(dia)+7),[rows,dia])
-  const tend=sim.tend
-  useEffect(()=>{if(!play)return;const i=setInterval(()=>setT(x=>Math.min(tend,x+vel/10)),100);return()=>clearInterval(i)},[play,vel,tend])
-  useEffect(()=>{if(t>=tend)setPlay(false)},[t,tend])
-  const pick=d=>{setDia(d);setT(0);setPlay(false)}
-
-  const stops=[],vehs=sim.veh.map((v,i)=>{
-    const c=COL[i%COL.length],r=en(v.real,t),pl=en(v.plan,t)
-    let hechas=0,dev=0
-    v.real.stops.forEach((s,j)=>{const P=v.plan.stops[j],done=s.t<=t,late=s.t-P.t>10
-      if(done){hechas++;dev=s.t-P.t}
-      stops.push({nombre:s.n.nombre,veh:v.id,plan:P.t,real:s.t,done,late,pos:[s.n.longitud,s.n.latitud]})})
-    return{id:v.id,c,r,pl,hechas,total:v.real.stops.length,dev,path:v.plan.w.map(x=>[x[1],x[2]])}})
-  const N=stops.length,done=stops.filter(s=>s.done),late=done.filter(s=>s.late)
-  const desv=done.length?done.reduce((a,s)=>a+s.real-s.plan,0)/done.length:0
-  const cReal=sim.veh.reduce((a,v)=>a+costo(v.real,t),0),cPlan=sim.veh.reduce((a,v)=>a+costo(v.plan,t),0)
-  const fReal=sim.veh.reduce((a,v)=>a+costo(v.real,1e9),0),fPlan=sim.veh.reduce((a,v)=>a+costo(v.plan,1e9),0)
-  const kpis=[['Vehículos en ruta',vehs.length],['Entregas completadas',done.length+' de '+N],['Entregas demoradas (más de 10 min)',late.length],['Desvío promedio (min)',(desv>=0?'+':'')+desv.toFixed(0)],['Costo acumulado real',$(cReal)],['Costo plan (mismo momento)',$(cPlan)]]
-  const st=s=>!s.done?[150,150,150]:s.late?[215,50,50]:[34,160,90]
-  const layers=[
-    new PathLayer({id:'rt',data:vehs,getPath:d=>d.path,getColor:d=>[...d.c,90],getWidth:3,widthMinPixels:2}),
-    new ScatterplotLayer({id:'st',data:stops,getPosition:d=>d.pos,getFillColor:st,getRadius:150,radiusMinPixels:5,stroked:true,getLineColor:[255,255,255],lineWidthMinPixels:1,pickable:true,updateTriggers:{getFillColor:[t]}}),
-    new ScatterplotLayer({id:'pl',data:vehs,getPosition:d=>d.pl.p,getRadius:200,radiusMinPixels:8,filled:false,stroked:true,getLineColor:d=>d.c,lineWidthMinPixels:2}),
-    new ScatterplotLayer({id:'rl',data:vehs,getPosition:d=>d.r.p,getFillColor:d=>d.c,getRadius:200,radiusMinPixels:10,stroked:true,getLineColor:[255,255,255],lineWidthMinPixels:2}),
-    new TextLayer({id:'tx',data:vehs,getPosition:d=>d.r.p,getText:d=>'V'+d.id,getSize:12,getPixelOffset:[0,-20],fontWeight:700}),
-    new ScatterplotLayer({id:'had',data:[HAD],getPosition:d=>[d.longitud,d.latitud],getFillColor:[240,120,20],getRadius:250,radiusMinPixels:9,stroked:true,getLineColor:[0,0,0],lineWidthMinPixels:2}),
-  ]
-  return(<>
-    <div className="r"><button className="b" onClick={onBack}>← Volver al mapa</button>
-      <h1 style={{margin:0,fontSize:22}}>Torre de control: seguimiento de un día de reparto</h1></div>
-    <p style={{margin:'0 0 10px',color:'#5b6678',fontSize:13}}>Simulación del reparto desde el HAD: plan contra real y costo mientras avanza el recorrido. No usa GPS real: el tránsito y las demoras son simulados.</p>
-    <div className="k">{kpis.map(([a,v])=><div key={a} className="c"><b style={{fontSize:22,color:'#006241'}}>{v}</b><div style={{fontSize:12,color:'#5b6678'}}>{a}</div></div>)}</div>
+export default function App(){
+  const [rows,setRows]=useState([]),[err,setErr]=useState(null)
+  const [cat,setCat]=useState('Todas'),[dia,setDia]=useState('Todos'),[dist,setDist]=useState('Todas'),[mode,setMode]=useState('puntos'),[vista,setVista]=useState('mapa')
+  useEffect(()=>{
+    if(!supabase){setErr('Faltan las variables VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY');return}
+    supabase.from('puntos').select('nombre,categoria,latitud,longitud,valor,dias,direccion').not('latitud','is',null)
+      .then(({data,error})=>error?setErr(error.message):setRows((data||[]).map(r=>({...r,km:km(HAD[0],r)}))))
+  },[])
+  const base=useMemo(()=>rows.filter(r=>(cat==='Todas'||r.categoria===cat)&&(!RINGS[dist]||(r.km>=RINGS[dist][0]&&r.km<RINGS[dist][1]))),[rows,cat,dist])
+  const f=useMemo(()=>dia==='Todos'?base:base.filter(r=>(r.dias||'').split(' ').includes(dia)),[base,dia])
+  const porDia=DIAS.map(([k])=>base.filter(r=>(r.dias||'').split(' ').includes(k)).length),mx=Math.max(1,...porDia)
+  const visitas=dia==='Todos'?f.reduce((a,r)=>a+r.valor,0):f.length
+  const kpis=[['Locales',f.length],[dia==='Todos'?'Visitas por semana':'Visitas ese día',visitas],['Pallets (estimado)',visitas*PALLETS_POR_VISITA],['Distancia prom. al HAD (km)',f.length?(f.reduce((a,r)=>a+r.km,0)/f.length).toFixed(1):'–'],['Locales con 3 visitas',f.filter(r=>r.valor===3).length]]
+  const lejanos=[...f].sort((a,b)=>b.km-a.km).slice(0,5)
+  const ring=r=>new ScatterplotLayer({id:'ring'+r,data:HAD,getPosition:d=>[d.longitud,d.latitud],getRadius:r*1000,radiusUnits:'meters',stroked:true,filled:false,getLineColor:[240,120,20,170],lineWidthMinPixels:1})
+  const layers=[ring(4),ring(8),
+    mode==='puntos'&&new ScatterplotLayer({id:'p',data:f,getPosition:d=>[d.longitud,d.latitud],getFillColor:d=>COL[d.categoria],getRadius:d=>120+d.valor*60,radiusMinPixels:5,stroked:true,getLineColor:[255,255,255],lineWidthMinPixels:1,pickable:true}),
+    mode==='calor'&&new HeatmapLayer({id:'h',data:f,getPosition:d=>[d.longitud,d.latitud],getWeight:d=>d.valor,radiusPixels:55}),
+    new ScatterplotLayer({id:'had',data:HAD,getPosition:d=>[d.longitud,d.latitud],getFillColor:[240,120,20],getRadius:250,radiusMinPixels:9,stroked:true,getLineColor:[0,0,0],lineWidthMinPixels:2,pickable:true}),
+    new TextLayer({id:'t',data:HAD,getPosition:d=>[d.longitud,d.latitud],getText:()=>'HAD',getSize:13,getPixelOffset:[0,-18],fontWeight:700})
+  ].filter(Boolean)
+  if(vista==='torre')return(<div className="w"><style>{css}</style><Torre rows={rows} onBack={()=>setVista('mapa')}/></div>)
+  return(<div className="w"><style>{css}</style>
+    <h1 style={{margin:0,fontSize:22}}>Red de distribución Starbucks CABA</h1>
+    <p style={{margin:'2px 0 12px',color:'#5b6678',fontSize:13}}>¿Qué locales concentran más visitas, cuándo y a qué distancia del HAD de Parque Patricios?</p>
+    {err&&<p style={{color:'#b00'}}>Error: {err}</p>}
+    <div className="k">{kpis.map(([t,v])=><div key={t} className="c"><b style={{fontSize:26,color:'#006241'}}>{v}</b><div style={{fontSize:12,color:'#5b6678'}}>{t}</div></div>)}</div>
     <div className="r">
-      {DIAS.map(([k,n])=><button key={k} className={'b'+(dia===k?' on':'')} onClick={()=>pick(k)}>{n}</button>)}
-      <button className="b on" onClick={()=>{if(t>=tend)setT(0);setPlay(!play)}}>{play?'Pausar':'Iniciar'}</button>
-      <button className="b" onClick={()=>{setT(0);setPlay(false)}}>Reiniciar</button>
-      <select value={vel} onChange={e=>setVel(+e.target.value)} style={{padding:6}}><option value={5}>Lento</option><option value={10}>Normal</option><option value={25}>Rápido</option></select>
-      <b style={{minWidth:50}}>{hm(t)}</b>
-      <input type="range" min={0} max={tend} step={1} value={t} onChange={e=>setT(+e.target.value)} style={{flex:1,minWidth:120}}/>
+      <button className="b" style={{background:'#f0781e',borderColor:'#f0781e',color:'#fff'}} onClick={()=>setVista('torre')}>Torre de control (simulación)</button>
+      {['puntos','calor'].map(m=><button key={m} className={'b'+(mode===m?' on':'')} onClick={()=>setMode(m)}>{m==='puntos'?'Puntos':'Mapa de calor'}</button>)}
+      <select value={cat} onChange={e=>setCat(e.target.value)} style={{padding:6}}>{['Todas','Alta','Media','Baja'].map(c=><option key={c} value={c}>{c==='Todas'?'Frecuencia: todas':'Frecuencia '+c}</option>)}</select>
+      <select value={dist} onChange={e=>setDist(e.target.value)} style={{padding:6}}>{Object.keys(RINGS).map(c=><option key={c} value={c}>{c==='Todas'?'Distancia: todas':c}</option>)}</select>
+      <button className={'b'+(dia==='Todos'?' on':'')} onClick={()=>setDia('Todos')}>Todos los días</button>
+      {DIAS.map(([k,n])=><button key={k} className={'b'+(dia===k?' on':'')} onClick={()=>setDia(k)}>{n}</button>)}
     </div>
     <div className="m">
-      <div style={{position:'relative',height:'62vh',minHeight:420,borderRadius:10,overflow:'hidden',border:'1px solid #d9dfe8'}}>
-        <DeckGL initialViewState={VIEW} controller layers={layers} getTooltip={({object})=>object&&object.nombre&&{html:`<b>${object.nombre}</b><br>Vehículo ${object.veh}<br>Llegada plan: ${hm(object.plan)}<br>Llegada real: ${hm(object.real)}<br>Desvío: ${(object.real-object.plan>=0?'+':'')+(object.real-object.plan).toFixed(0)} min`,style:{fontSize:'12px'}}}>
+      <div style={{position:'relative',height:'66vh',minHeight:420,borderRadius:10,overflow:'hidden',border:'1px solid #d9dfe8'}}>
+        <DeckGL initialViewState={VIEW} controller layers={layers} getTooltip={({object})=>object&&{html:object.categoria?`<b>${object.nombre}</b><br>Frecuencia: ${object.categoria} (${object.valor} por semana)<br>Días: ${object.dias}<br>Distancia al HAD: ${object.km.toFixed(1)} km<br>${object.direccion}`:`<b>${object.nombre}</b>`,style:{fontSize:'12px'}}}>
           <Map mapStyle={STYLE}/>
         </DeckGL>
       </div>
       <div style={{display:'flex',flexDirection:'column',gap:12}}>
-        <div className="c"><b>Vehículos</b>
-          {vehs.map(v=><div key={v.id} style={{fontSize:13,margin:'6px 0'}}><span style={{display:'inline-block',width:10,height:10,borderRadius:5,background:`rgb(${v.c})`,marginRight:6}}/>V{v.id}: {v.hechas}/{v.total} entregas<span style={{float:'right',color:v.dev>10?'#d73232':'#006241'}}>{v.hechas?(v.dev>=0?'+':'')+v.dev.toFixed(0)+' min':'–'}</span></div>)}
-        </div>
-        <div className="c"><b>Costo del día</b>
-          <div style={{fontSize:13,margin:'6px 0'}}>Plan: {$(fPlan)}</div>
-          <div style={{fontSize:13}}>Real: {$(fReal)}<span style={{float:'right',color:'#d73232'}}>{fPlan?'+'+((fReal/fPlan-1)*100).toFixed(0)+'%':''}</span></div></div>
-        <div className="c" style={{fontSize:12,color:'#5b6678'}}>Círculo lleno: vehículo real. Círculo vacío: dónde debería estar según el plan. Paradas: gris pendiente, verde a tiempo, rojo con más de 10 min de demora. Supuestos a validar: vehículo de {K.CAP} pallets, {K.PAL} pallets por visita, {K.VEL} km/h, {K.SERV} min por parada, 2 vueltas por vehículo, salida 17:00 del HAD, distancias en línea recta por {K.CIRC}, tarifas ilustrativas de {$(K.KM_C)} por km y {$(K.H_C)} por hora.</div>
+        <div className="c"><b>Carga por día</b><div style={{fontSize:12,color:'#5b6678'}}>Locales visitados. Tocá una barra para filtrar.</div>
+          <div style={{display:'flex',gap:8,alignItems:'flex-end',height:110,marginTop:8}}>
+            {DIAS.map(([k,n],i)=><div key={k} onClick={()=>setDia(dia===k?'Todos':k)} style={{flex:1,textAlign:'center',cursor:'pointer',fontSize:12}}>
+              <div>{porDia[i]}</div><div style={{height:porDia[i]/mx*70,background:dia===k?'#006241':'#60aa78',borderRadius:4}}/>{n}</div>)}
+          </div></div>
+        <div className="c"><b>Locales más lejanos del HAD</b>
+          {lejanos.map(r=><div key={r.nombre} style={{fontSize:13,margin:'6px 0'}}>{r.nombre}<span style={{float:'right',color:'#006241'}}>{r.km.toFixed(1)} km</span></div>)}
+          {!lejanos.length&&<div style={{fontSize:13}}>Sin datos</div>}</div>
+        <div className="c" style={{fontSize:12,color:'#5b6678'}}>Frecuencia: Alta = 3 visitas, Media = 2, Baja = 1 por semana. Círculos naranja: 4 y 8 km desde el HAD. Pallets estimados a razón de {PALLETS_POR_VISITA} por visita (supuesto a validar).</div>
       </div>
     </div>
-  </>)}
+    <p style={{fontSize:12,color:'#5b6678'}}>Fuente: listado de locales y frecuencias de reparto, georreferenciado con GeoRef Argentina. Datos cargados en Supabase.</p>
+  </div>)
+}
